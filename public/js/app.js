@@ -9,6 +9,13 @@
     home:    { title: 'Домик',   go: 'Привести домой!',     hint: 'Нарисуй котика, собачку или хомячка', arrive: 'пришёл', move: 'идёт', btn: 'pink' },
   };
   const POLL_MS = 5000;
+  // Как может двигаться зверёк (кнопки в окне «Вот он!»)
+  const MOTION_UI = [
+    { k: 'walk', t: 'Ходит', verb: 'идёт', icon: 'paw' },
+    { k: 'fly', t: 'Летает', verb: 'летит', icon: 'wing' },
+    { k: 'swim', t: 'Плавает', verb: 'плывёт', icon: 'fish' },
+    { k: 'hop', t: 'Прыгает', verb: 'скачет', icon: 'hop' },
+  ];
 
   // ---------- Связь с сервером ----------
   const realApi = {
@@ -217,11 +224,12 @@
     const bg = h(`<div class="sheet-bg"><div class="sheet"></div></div>`);
     const sheet = bg.querySelector('.sheet');
     document.body.append(bg);
-    const close = () => { bg.remove(); };
+    const close = () => { if (stopPreview) stopPreview(); bg.remove(); };
     bg.addEventListener('pointerdown', (e) => { if (e.target === bg) close(); });
     cleanup.push(close);
 
     let photo = null, result = null, flipped = false, sens = 0.5;
+    let motion = null, stopPreview = null; // как двигается: swim / walk / fly / hop
 
     const fileInput = (capture) => {
       const inp = document.createElement('input');
@@ -231,13 +239,14 @@
         const f = inp.files && inp.files[0];
         if (!f) return;
         try { photo = await Cutout.loadFile(f); } catch { return stepPick('Не получилось открыть фото. Попробуй ещё раз.'); }
-        flipped = false; sens = 0.5;
+        flipped = false; sens = 0.5; motion = null;
         stepPreview();
       };
       inp.click();
     };
 
     function stepPick(error) {
+      if (stopPreview) { stopPreview(); stopPreview = null; }
       sheet.innerHTML = `
         <button class="round small x" aria-label="Закрыть">${I.close}</button>
         <h3>Новый друг!</h3>
@@ -258,6 +267,9 @@
         <button class="round small x" aria-label="Закрыть">${I.close}</button>
         <h3>Вот он!</h3>
         <div class="preview ${loc}"><div class="loader"><svg class="spinner" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="#fff" stroke-width="6" stroke-dasharray="80 50" stroke-linecap="round"/></svg>Колдую…</div></div>
+        <div class="motions">
+          ${MOTION_UI.map((m) => `<button data-m="${m.k}">${I[m.icon]}<span>${m.t}</span></button>`).join('')}
+        </div>
         <input class="field" maxlength="40" placeholder="Как его зовут?">
         <details class="tune"><summary>Плохо вырезалось?</summary>
           <div class="row"><span>Меньше</span><input class="slider" type="range" min="0" max="1" step="0.05" value="${sens}"><span>Больше</span></div>
@@ -272,6 +284,9 @@
       let tm;
       slider.oninput = () => { sens = +slider.value; clearTimeout(tm); tm = setTimeout(runCut, 250); };
       sheet.querySelector('[data-a=save]').onclick = save;
+      sheet.querySelectorAll('.motions button').forEach((b) => b.onclick = () => {
+        Sound.pop(); motion = b.dataset.m; showMotion(); startPreview();
+      });
       setTimeout(runCut, 60); // даём окну нарисоваться
     }
 
@@ -286,14 +301,31 @@
         return;
       }
       Sound.magic();
+      // по умолчанию — как принято в этом мире (в море плавают, на суше ходят); ребёнок меняет одной кнопкой
+      if (!motion) motion = Scene.defaultMotion(loc);
       box.innerHTML = '';
-      result.removeAttribute('style');
-      box.append(result);
-      const dir = h(`<div class="dir">${L.move} → сюда</div>`);
+      const cv = document.createElement('canvas');
+      cv.className = 'anim';
+      const dir = h(`<div class="dir"></div>`);
       const fb = h(`<button class="round small flipbtn" aria-label="Развернуть">${I.flip}</button>`);
-      fb.onclick = () => { Sound.click(); flipped = !flipped; result = mirror(result); box.querySelector('canvas').replaceWith(result); };
-      box.append(dir, fb);
+      fb.onclick = () => { Sound.click(); flipped = !flipped; result = mirror(result); startPreview(); };
+      box.append(cv, dir, fb);
+      showMotion();
+      startPreview();
       saveBtn.disabled = false;
+    }
+
+    function showMotion() {
+      sheet.querySelectorAll('.motions button').forEach((b) => b.classList.toggle('on', b.dataset.m === motion));
+      const d = sheet.querySelector('.preview .dir');
+      const m = MOTION_UI.find((x) => x.k === motion);
+      if (d && m) d.textContent = `${m.verb} → сюда`;
+    }
+
+    function startPreview() {
+      if (stopPreview) stopPreview();
+      const cv = sheet.querySelector('.preview canvas.anim');
+      if (cv && result) stopPreview = Scene.preview(cv, result, motion);
     }
 
     async function save() {
@@ -304,7 +336,7 @@
       try {
         let data = result.toDataURL('image/webp', 0.9);
         if (!data.startsWith('data:image/webp')) data = result.toDataURL('image/png');
-        await api.add({ location: loc, name: sheet.querySelector('.field').value.trim(), image: data, w: result.width, h: result.height });
+        await api.add({ location: loc, name: sheet.querySelector('.field').value.trim(), image: data, w: result.width, h: result.height, motion });
         close();
         done();
       } catch (e) {
