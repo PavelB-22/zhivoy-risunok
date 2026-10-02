@@ -74,11 +74,11 @@ window.Scene = (function () {
       this.first = false;
       for (const item of list) {
         if (this.creatures.has(item.id)) continue;
-        const c = new Creature(item, this.cfg.mode);
+        const c = new Creature(item, this.loc);
         this.creatures.set(item.id, c);
         const img = new Image();
         img.onload = () => {
-          c.img = img;
+          c.setImage(img);
           c.fit(this);
           if (initial) c.placeInside(this); else { c.enter(this); this.onArrive(c); }
         };
@@ -121,7 +121,8 @@ window.Scene = (function () {
         c.update(dt, this);
         if (c.gone) this.creatures.delete(c.id);
       }
-      if (this.cfg.mode === 'walk') list.sort((a, b) => a.y - b.y);
+      // сначала те, кто на земле (дальние раньше), потом летающие и плавающие — поверх
+      list.sort((a, b) => (a.grounded === b.grounded ? (a.grounded ? a.y - b.y : 0) : a.grounded ? -1 : 1));
       for (const c of list) if (!c.gone) c.draw(ctx, this);
 
       BG[this.loc].front(ctx, W, H, this.t, this.decor, dt, this);
@@ -151,14 +152,87 @@ window.Scene = (function () {
   }
 
   // ---------------- Существо ----------------
+  // Где живёт существо: «float» — летает/плавает (y — центр), «ground» — ходит/прыгает (y — ноги)
+  const ZONES = {
+    sea:     { float: [0.12, 0.82], ground: [0.87, 0.97] },
+    savanna: { float: [0.08, 0.50], ground: [0.60, 0.95] },
+    home:    { float: [0.08, 0.55], ground: [0.66, 0.96] },
+  };
+  const MOTIONS = ['swim', 'walk', 'fly', 'hop'];
+  const defaultMotion = (loc) => (loc === 'sea' ? 'swim' : 'walk');
+  const SIZE = { swim: 165, fly: 150, walk: 215, hop: 190 };
+  const SPEED = { swim: 70, fly: 85, walk: 55, hop: 75 };
+
+  // Похож ли рисунок на бабочку с раскрытыми крыльями?
+  // 1) почти зеркальный слева-направо (рука ребёнка неровная — допускаем расхождение)
+  // 2) с «вырезами»: между крыльями и у головы есть впадины (у овального хомяка их нет)
+  function analyze(img) {
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const k = Math.min(1, 64 / Math.max(iw, ih));
+    const w = Math.max(4, Math.round(iw * k)), h = Math.max(4, Math.round(ih * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(img, 0, 0, w, h);
+    let d;
+    try { d = x.getImageData(0, 0, w, h).data; } catch { return { sym: false, flyLike: false, iou: 0, solidity: 1 }; }
+    const M = new Uint8Array(w * h);
+    let n = 0, mx = 0;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (d[(j * w + i) * 4 + 3] > 100) { M[j * w + i] = 1; n++; mx += i; }
+    if (!n) return { sym: false, flyLike: false, iou: 0, solidity: 1 };
+    // зеркалим относительно «центра тяжести», с допуском ±1 пиксель
+    const cx = mx / n;
+    const at = (i, j) => i >= 0 && i < w && j >= 0 && j < h && M[j * w + i];
+    let inter = 0, uni = 0;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const a = M[j * w + i];
+      const mi = Math.round(2 * cx - i);
+      const b = at(mi, j) || at(mi - 1, j) || at(mi + 1, j) || at(mi, j - 1) || at(mi, j + 1);
+      const b0 = at(mi, j);
+      if (a && b) inter++;
+      if (a || b0) uni++;
+    }
+    const iou = uni ? inter / uni : 0;
+    // «плотность» фигуры: площадь / площадь выпуклой оболочки
+    const pts = [];
+    for (let j = 0; j < h; j++) { let l = -1, r = -1; for (let i = 0; i < w; i++) if (M[j * w + i]) { if (l < 0) l = i; r = i; } if (l >= 0) { pts.push([l, j], [r + 1, j], [l, j + 1], [r + 1, j + 1]); } }
+    pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    const cross = (o, a2, b2) => (a2[0] - o[0]) * (b2[1] - o[1]) - (a2[1] - o[1]) * (b2[0] - o[0]);
+    const lower = [], upper = [];
+    for (const p of pts) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
+    for (let t = pts.length - 1; t >= 0; t--) { const p = pts[t]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+    const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+    let area = 0;
+    for (let t = 0; t < hull.length; t++) { const p = hull[t], q = hull[(t + 1) % hull.length]; area += p[0] * q[1] - q[0] * p[1]; }
+    const solidity = area ? n / Math.abs(area / 2) : 1;
+    // построчно: насколько одинаково рисунок расходится влево и вправо от центра
+    let diff = 0, tot = 0, wl = 0, wr = 0;
+    for (let j = 0; j < h; j++) {
+      let l = -1, r = -1, cl = 0, cr = 0;
+      for (let i = 0; i < w; i++) if (M[j * w + i]) { if (l < 0) l = i; r = i; if (i < cx) cl++; else cr++; }
+      if (l < 0) continue;
+      const dl = cx - l, dr = r - cx;
+      diff += Math.abs(dl - dr); tot += Math.max(1, dl + dr);
+      wl += cl; wr += cr;
+    }
+    const rowSym = 1 - diff / tot;            // 1 — идеально ровно
+    const balance = Math.min(wl, wr) / Math.max(1, Math.max(wl, wr)); // 1 — слева и справа поровну
+    const ratio = w / h;
+    // «как бабочка» — ровно расходится в обе стороны от тела; иначе считаем, что нарисовано сбоку (как птица)
+    const sym = rowSym > 0.65 && balance > 0.8;
+    return { sym, iou, rowSym, balance, solidity, ratio };
+  }
+
   class Creature {
-    constructor(item, mode) {
+    constructor(item, loc) {
       this.id = item.id;
       this.name = item.name || '';
-      this.mode = mode;
+      this.loc = loc;
+      this.motion = MOTIONS.includes(item.motion) ? item.motion : defaultMotion(loc);
+      this.grounded = this.motion === 'walk' || this.motion === 'hop';
       this.aspect = item.w / item.h;
       this.state = 'live';
       this.phase = rand(0, 10);
+      this.hopT = rand(0, 1);
       this.dir = Math.random() < 0.5 ? 1 : -1;
       this.face = this.dir;
       this.vx = 0; this.vy = 0;
@@ -167,45 +241,43 @@ window.Scene = (function () {
       this.kSpeed = rand(0.8, 1.2);
     }
 
+    setImage(img) { this.img = img; this.sym = analyze(img).sym; }
+    area(w) { const z = ZONES[w.loc] || ZONES.home; return this.grounded ? z.ground : z.float; }
+
     fit(w) {
       const u = w.unit;
-      this.base = (this.mode === 'swim' ? 165 : 215) * u * this.kSize;
-      this.speed = (this.mode === 'swim' ? 70 : 55) * u * this.kSpeed;
-      this.size();
-      if (w.cfg.mode === 'walk') {
-        const [a, b] = w.cfg.area;
-        this.y = clamp(this.y ?? 0, w.H * a, w.H * b);
-      }
+      this.base = SIZE[this.motion] * u * this.kSize;
+      this.speed = SPEED[this.motion] * u * this.kSpeed;
+      if (this.grounded) { const [a, b] = this.area(w); this.y = clamp(this.y ?? w.H * b, w.H * a, w.H * b); }
+      this.size(w);
     }
 
     size(w) {
       let L = this.base;
-      if (this.mode === 'walk' && w) {
-        const [a, b] = w.cfg.area;
-        const t = clamp((this.y - w.H * a) / (w.H * (b - a)), 0, 1);
-        L *= 0.6 + 0.45 * t;
-      }
-      // самая длинная сторона = L, но не выше разумного
+      if (this.grounded && w) L *= 0.6 + 0.45 * this.depth(w);
       if (this.aspect >= 1) { this.dw = L; this.dh = L / this.aspect; }
-      else { this.dh = L * (this.mode === 'walk' ? 1 : 0.85); this.dw = this.dh * this.aspect; }
+      else { this.dh = L * (this.grounded ? 1 : 0.85); this.dw = this.dh * this.aspect; }
     }
 
+    depth(w) { const [a, b] = this.area(w); return clamp((this.y - w.H * a) / (w.H * (b - a)), 0, 1); }
+
     placeInside(w) {
-      const [a, b] = w.cfg.area;
+      const [a, b] = this.area(w);
       this.x = rand(w.W * 0.15, w.W * 0.85);
       this.y = rand(w.H * a, w.H * b);
-      if (this.mode === 'swim') this.y = clamp(this.y, w.H * a + this.dh, w.H * b - this.dh / 2);
+      if (!this.grounded) this.y = clamp(this.y, w.H * a + this.dh / 2, w.H * b - this.dh / 2);
+      this.size(w);
       this.newTarget(w);
     }
 
     enter(w) {
-      const [a, b] = w.cfg.area;
+      const [a, b] = this.area(w);
       this.state = 'enter';
       this.dir = Math.random() < 0.5 ? 1 : -1;
       this.face = this.dir;
+      this.y = this.grounded ? rand(w.H * (a + (b - a) * 0.3), w.H * b) : rand(w.H * a + this.dh / 2, w.H * b - this.dh / 2);
       this.size(w);
       this.x = this.dir > 0 ? -this.dw : w.W + this.dw;
-      this.y = this.mode === 'swim' ? rand(w.H * a + this.dh, w.H * b - this.dh) : rand(w.H * (a + 0.1), w.H * b);
       this.tx = this.dir > 0 ? rand(w.W * 0.3, w.W * 0.6) : rand(w.W * 0.4, w.W * 0.7);
       this.ty = this.y;
       this.label = 7;
@@ -220,12 +292,14 @@ window.Scene = (function () {
     }
 
     newTarget(w) {
-      const [a, b] = w.cfg.area;
-      if (this.mode === 'swim') {
-        // плывём далеко в сторону, немного меняя глубину
+      const [a, b] = this.area(w);
+      if (this.motion === 'swim') {
         const goRight = this.x < w.W * 0.35 ? true : this.x > w.W * 0.65 ? false : Math.random() < 0.5;
         this.tx = goRight ? rand(w.W * 0.7, w.W * 0.92) : rand(w.W * 0.08, w.W * 0.3);
         this.ty = clamp(this.y + rand(-0.25, 0.25) * w.H, w.H * a + this.dh * 0.6, w.H * b - this.dh * 0.5);
+      } else if (this.motion === 'fly') {
+        this.tx = rand(w.W * 0.08, w.W * 0.92);
+        this.ty = rand(w.H * a + this.dh * 0.5, w.H * b - this.dh * 0.5);
       } else {
         this.tx = rand(w.W * 0.08, w.W * 0.92);
         this.ty = rand(w.H * a, w.H * b);
@@ -235,8 +309,17 @@ window.Scene = (function () {
     poke() { this.pokeT = 0; this.label = 4; }
 
     hit(x, y) {
-      const top = this.mode === 'walk' ? this.y - this.dh : this.y - this.dh / 2;
+      const top = this.grounded ? this.y - this.dh : this.y - this.dh / 2;
       return Math.abs(x - this.x) < this.dw * 0.5 && y > top && y < top + this.dh;
+    }
+
+    // Только «внутренние часы» анимации (взмахи, шаги, прыжки) — используется и в предпросмотре
+    tick(dt, moving) {
+      const v = Math.abs(this.vx) / (this.speed || 1);
+      if (this.motion === 'swim') this.phase += dt * (4 + 6 * v);
+      else if (this.motion === 'fly') this.phase += dt * (11 + 5 * v);
+      else if (this.motion === 'walk') this.phase += moving ? dt * (7 + 6 * v) : dt * 1.5;
+      else { const f = this.hopT % 1; if (moving || f < 0.97) this.hopT += dt * 1.5; } // стоит — не прыгает на месте
     }
 
     update(dt, w) {
@@ -245,33 +328,43 @@ window.Scene = (function () {
       const leaving = this.state === 'leave';
       const sp = this.speed * (leaving ? 2.2 : this.state === 'enter' ? 1.4 : 1);
 
-      if (this.mode === 'swim') {
+      if (!this.grounded) {
         const dx = this.tx - this.x, dy = this.ty - this.y;
+        const fly = this.motion === 'fly';
         const wantVx = Math.sign(dx) * sp * clamp(Math.abs(dx) / 80, 0.25, 1);
-        const wantVy = clamp(dy * 0.6, -sp * 0.45, sp * 0.45);
-        this.vx += (wantVx - this.vx) * Math.min(1, dt * 1.6);
-        this.vy += (wantVy - this.vy) * Math.min(1, dt * 1.6);
-        this.x += this.vx * dt; this.y += this.vy * dt;
-        this.phase += dt * (4 + 6 * Math.abs(this.vx) / this.speed);
-        if (!leaving && Math.abs(dx) < 40 * w.unit) { this.state = 'live'; this.newTarget(w); }
+        const wantVy = clamp(dy * (fly ? 0.9 : 0.6), -sp * (fly ? 0.7 : 0.45), sp * (fly ? 0.7 : 0.45));
+        const k = Math.min(1, dt * (fly ? 2.2 : 1.6));
+        this.vx += (wantVx - this.vx) * k;
+        this.vy += (wantVy - this.vy) * k;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.tick(dt, true);
+        if (!leaving && Math.hypot(dx, fly ? dy : 0) < 40 * w.unit) { this.state = 'live'; this.newTarget(w); }
       } else {
+        const dx = this.tx - this.x;
+        const v = sp * (0.6 + 0.45 * this.depth(w));
+        let moving = false;
         if (this.idle > 0 && !leaving) {
           this.idle -= dt;
           this.vx *= 0.85;
-          this.phase += dt * 1.5;
+        } else if (this.motion === 'hop') {
+          // прыжками: двигаемся только в воздухе
+          const f = this.hopT % 1;
+          const air = f < 0.62;
+          this.vx = air ? Math.sign(dx) * v * 1.7 : 0;
+          if (Math.abs(this.vx) > 1) this.dir = Math.sign(this.vx);
+          moving = true;
         } else {
-          const dx = this.tx - this.x;
-          const depth = clamp((this.y - w.H * w.cfg.area[0]) / (w.H * (w.cfg.area[1] - w.cfg.area[0])), 0, 1);
-          const v = sp * (0.6 + 0.45 * depth);
           this.vx += (Math.sign(dx) * v - this.vx) * Math.min(1, dt * 3);
-          this.x += this.vx * dt;
-          this.y += clamp((this.ty - this.y) * 0.5, -v * 0.3, v * 0.3) * dt;
-          this.phase += dt * (6 + 6 * Math.abs(this.vx) / this.speed);
-          if (!leaving && Math.abs(dx) < 20 * w.unit) {
-            this.state = 'live';
-            if (Math.random() < 0.55) this.idle = rand(1.2, 3.5);
-            this.newTarget(w);
-          }
+          moving = true;
+        }
+        this.x += this.vx * dt;
+        this.y += clamp((this.ty - this.y) * 0.5, -v * 0.3, v * 0.3) * dt * (this.motion === 'hop' && Math.abs(this.vx) < 1 ? 0 : 1);
+        this.tick(dt, moving);
+        if (!leaving && Math.abs(dx) < 20 * w.unit && this.idle <= 0) {
+          this.state = 'live';
+          if (Math.random() < 0.55) this.idle = rand(1.2, 3.5);
+          this.newTarget(w);
         }
         this.size(w);
       }
@@ -280,44 +373,97 @@ window.Scene = (function () {
       if (leaving && (this.x < -this.dw * 1.2 || this.x > w.W + this.dw * 1.2)) this.gone = true;
     }
 
-    draw(ctx, w) {
+    draw(ctx, w) { this.drawAt(ctx, this.x, this.y, w.unit, true); }
+
+    // Рисуем существо в точке (x, y) — общая часть для сцены и предпросмотра
+    drawAt(ctx, X, Y, unit, shadow) {
       const img = this.img, dw = this.dw, dh = this.dh;
+      const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
       const pk = this.pokeT < 1 ? Math.sin(this.pokeT * Math.PI) : 0;
+      const spin = this.pokeT < 1 ? (1 - Math.pow(1 - this.pokeT, 3)) * Math.PI * 2 : 0;
+      const sx = Math.abs(this.face) < 0.15 ? 0.15 * Math.sign(this.face || 1) : this.face;
       ctx.save();
-      if (this.mode === 'swim') {
-        ctx.translate(this.x, this.y + Math.sin(this.phase * 0.35) * 4 * w.unit);
-        const spin = this.pokeT < 1 ? (1 - Math.pow(1 - this.pokeT, 3)) * Math.PI * 2 : 0; // кувырок при касании
+
+      if (this.motion === 'swim') {
+        ctx.translate(X, Y + Math.sin(this.phase * 0.35) * 4 * unit);
         ctx.rotate(clamp(this.vy / (this.speed * 3), -0.35, 0.35) * Math.sign(this.face || 1) + spin * Math.sign(this.face || 1));
-        const sx = Math.abs(this.face) < 0.15 ? 0.15 * Math.sign(this.face || 1) : this.face;
         ctx.scale(sx * (1 + pk * 0.2), 1 + pk * 0.2);
-        // Тело изгибается волной: хвост (слева) машет сильнее, голова почти неподвижна
-        const N = 18, iw = img.naturalWidth, ih = img.naturalHeight;
-        const sw = iw / N, ddw = dw / N;
-        const amp = dh * 0.09;
+        // тело изгибается волной: хвост (слева) машет сильнее, голова почти неподвижна
+        const N = 18, sw = iw / N, ddw = dw / N, amp = dh * 0.09;
         for (let i = 0; i < N; i++) {
           const u = (i + 0.5) / N;
-          const k = Math.pow(1 - u, 1.6);
-          const off = Math.sin(this.phase - u * 3.2) * amp * k;
+          const off = Math.sin(this.phase - u * 3.2) * amp * Math.pow(1 - u, 1.6);
           ctx.drawImage(img, i * sw, 0, sw, ih, -dw / 2 + i * ddw, -dh / 2 + off, ddw + 0.8, dh);
         }
-      } else {
-        const moving = Math.abs(this.vx) > this.speed * 0.15;
-        const bob = moving ? Math.abs(Math.sin(this.phase)) * dh * 0.07 : Math.sin(this.phase * 2) * dh * 0.01;
-        const rock = moving ? Math.sin(this.phase) * 0.06 : 0;
+
+      } else if (this.motion === 'fly') {
+        const flap = Math.cos(this.phase);
+        ctx.translate(X, Y + Math.sin(this.phase * 0.5) * 6 * unit - flap * 3 * unit);
+        ctx.rotate(clamp(this.vx / (this.speed * 6), -0.2, 0.2) + spin * 0.5);
+        if (this.sym) {
+          // бабочка: левое и правое крыло складываются к телу и раскрываются
+          const f = 0.18 + 0.82 * (0.5 + 0.5 * flap);
+          const s = 1 + pk * 0.2;
+          ctx.scale(s, s);
+          ctx.drawImage(img, 0, 0, iw / 2, ih, -dw / 2 * f, -dh / 2, dw / 2 * f + 0.6, dh);
+          ctx.drawImage(img, iw / 2, 0, iw / 2, ih, 0, -dh / 2, dw / 2 * f, dh);
+        } else {
+          // птица сбоку: машет верхняя часть (крыло)
+          ctx.scale(sx * (1 + pk * 0.2), 1 + pk * 0.2);
+          const split = 0.55;
+          ctx.drawImage(img, 0, ih * split, iw, ih * (1 - split), -dw / 2, -dh / 2 + dh * split - 0.5, dw, dh * (1 - split) + 0.5);
+          ctx.save();
+          ctx.translate(0, -dh / 2 + dh * split);
+          ctx.scale(1, 0.25 + 0.75 * (0.5 + 0.5 * flap));
+          ctx.drawImage(img, 0, 0, iw, ih * split, -dw / 2, -dh * split, dw, dh * split);
+          ctx.restore();
+        }
+
+      } else if (this.motion === 'walk') {
+        const moving = Math.abs(this.vx) > this.speed * 0.15 || !shadow;
+        const bob = moving ? Math.abs(Math.sin(this.phase)) * dh * 0.04 : Math.sin(this.phase * 2) * dh * 0.01;
         const hop = pk * dh * 0.45;
-        // тень
-        ctx.fillStyle = 'rgba(40,20,0,0.18)';
-        ctx.beginPath();
-        ctx.ellipse(this.x, this.y, dw * 0.38 * (1 - pk * 0.3), dh * 0.07, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.translate(this.x, this.y - bob - hop);
-        ctx.rotate(rock);
-        const breathe = 1 + Math.sin(this.t2 = (this.t2 || 0) + 0.04) * 0.015;
-        const sx = Math.abs(this.face) < 0.15 ? 0.15 * Math.sign(this.face || 1) : this.face;
-        ctx.scale(sx * (1 + pk * 0.08), breathe * (1 - pk * 0.05));
+        if (shadow) this.shadow(ctx, X, Y, dw, dh, 1 - pk * 0.3);
+        ctx.translate(X, Y - bob - hop);
+        ctx.rotate(moving ? Math.sin(this.phase * 2) * 0.025 : 0);
+        ctx.scale(sx * (1 + pk * 0.08), 1 + Math.sin(this.phase * 0.7) * 0.01);
+        // туловище — верхние 2/3; ножки — нижняя треть: задние и передние шагают по очереди
+        const legTop = 0.66, swing = moving ? Math.sin(this.phase) * 0.3 : 0;
+        ctx.drawImage(img, 0, 0, iw, ih * legTop, -dw / 2, -dh, dw, dh * legTop + 1);
+        const ly = -dh + dh * legTop, lh = dh * (1 - legTop);
+        const leg = (srcX, dstX, k) => {
+          ctx.save();
+          ctx.translate(dstX, ly);
+          ctx.transform(1, 0, k, 1, 0, 0);
+          ctx.drawImage(img, srcX, ih * legTop, iw / 2, ih * (1 - legTop), 0, 0, dw / 2 + 0.6, lh);
+          ctx.restore();
+        };
+        // середина живота рисуется неподвижной — чтобы между шагающими ногами не было щёлки
+        ctx.drawImage(img, iw * 0.3, ih * legTop, iw * 0.4, ih * (1 - legTop) * 0.45, -dw * 0.2, ly - 0.5, dw * 0.4, lh * 0.45 + 0.5);
+        leg(0, -dw / 2, swing);        // задние ноги
+        leg(iw / 2, 0, -swing);        // передние ноги
+
+      } else {
+        // прыгает: присел — взлетел (вытянулся) — приземлился (сплющился)
+        const f = this.hopT % 1;
+        let lift = 0, sxk = 1, syk = 1;
+        if (f < 0.62) { const g = f / 0.62; lift = Math.sin(g * Math.PI) * dh * 0.55; syk = 1.08; sxk = 0.94; }
+        else { const g = (f - 0.62) / 0.38; const q = Math.sin(g * Math.PI) * 0.16; syk = 1 - q; sxk = 1 + q * 0.8; }
+        lift += pk * dh * 0.45;
+        if (shadow) this.shadow(ctx, X, Y, dw, dh, 1 - Math.min(0.6, lift / dh));
+        ctx.translate(X, Y - lift);
+        ctx.rotate(f < 0.62 ? (0.5 - f / 0.62) * -0.25 * Math.sign(this.face || 1) : 0);
+        ctx.scale(sx * sxk, syk);
         ctx.drawImage(img, -dw / 2, -dh, dw, dh);
       }
       ctx.restore();
+    }
+
+    shadow(ctx, x, y, dw, dh, k) {
+      ctx.fillStyle = 'rgba(40,20,0,0.18)';
+      ctx.beginPath();
+      ctx.ellipse(x, y, dw * 0.38 * k, dh * 0.07 * k, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     drawLabel(ctx, w) {
@@ -328,7 +474,7 @@ window.Scene = (function () {
       ctx.globalAlpha = a;
       ctx.font = `800 ${fs}px ${FONT}`;
       const tw = ctx.measureText(this.name).width + fs * 1.2;
-      const x = this.x, y = (this.mode === 'swim' ? this.y - this.dh / 2 : this.y - this.dh) - fs * 1.1;
+      const x = this.x, y = (this.grounded ? this.y - this.dh : this.y - this.dh / 2) - fs * 1.1;
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
       roundRect(ctx, x - tw / 2, y - fs * 0.85, tw, fs * 1.6, fs * 0.8);
       ctx.fill();
@@ -338,6 +484,34 @@ window.Scene = (function () {
       ctx.fillText(this.name, x, y - fs * 0.05);
       ctx.restore();
     }
+  }
+
+  // Предпросмотр в окне «Вот он!»: зверёк двигается выбранным способом на месте
+  function preview(canvas, img, motion) {
+    const c = new Creature({ id: 0, w: img.width, h: img.height, motion }, 'home');
+    c.setImage(img);
+    c.dir = c.face = 1;
+    c.speed = 60;
+    c.vx = 50;
+    let run = true, last = performance.now();
+    const ctx = canvas.getContext('2d');
+    const loop = (now) => {
+      if (!run) return;
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const W = canvas.clientWidth, H = canvas.clientHeight;
+      if (canvas.width !== Math.round(W * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const grounded = motion === 'walk' || motion === 'hop';
+      const L = Math.min(W * 0.62, H * (grounded ? 0.5 : 0.62) * Math.max(1, c.aspect));
+      if (c.aspect >= 1) { c.dw = L; c.dh = L / c.aspect; } else { c.dh = Math.min(L, H * (grounded ? 0.5 : 0.62)); c.dw = c.dh * c.aspect; }
+      c.tick(dt, true);
+      c.drawAt(ctx, W / 2, grounded ? H * 0.88 : H / 2, 1, grounded);
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    return () => { run = false; };
   }
 
   // ---------------- Фигурки для частиц ----------------
@@ -695,5 +869,5 @@ window.Scene = (function () {
     c.globalAlpha = 1;
   }
 
-  return { World, LOC };
+  return { World, LOC, analyze, preview, defaultMotion };
 })();
