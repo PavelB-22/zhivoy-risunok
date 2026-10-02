@@ -20,6 +20,10 @@ window.Art = (function () {
     logout: i('<path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9"/>'),
     install: i('<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>'),
     back: i('<path d="M15 5l-7 7 7 7"/>'),
+    paw: i('<circle cx="12" cy="15.5" r="4"/><circle cx="5.5" cy="10" r="1.8"/><circle cx="9.5" cy="6" r="1.8"/><circle cx="14.5" cy="6" r="1.8"/><circle cx="18.5" cy="10" r="1.8"/>'),
+    wing: i('<path d="M12 8v11"/><path d="M12 11C9 4 3 4 3 9s5 5 9 2"/><path d="M12 11c3-7 9-7 9-2s-5 5-9 2"/><path d="M12 13c-3 0-6 2-5 5s4 1 5-3M12 13c3 0 6 2 5 5s-4 1-5-3"/><path d="M10 5l2 3 2-3"/>'),
+    fish: i('<path d="M3 12c3-5 9-6 13 0-4 6-10 5-13 0z"/><path d="M16 12l5-4v8z"/><circle cx="7.5" cy="11" r=".6"/>'),
+    hop: i('<path d="M3 20c1.5-8 6-8 7.5 0M12 20c1.5-11 7.5-11 9 0"/><path d="M19 16l2 4 2-3"/>'),
     magic: i('<path d="m4 20 11-11M14 4l1 2 2 1-2 1-1 2-1-2-2-1 2-1zM19 11l.7 1.3L21 13l-1.3.7L19 15l-.7-1.3L17 13l1.3-.7z"/>'),
   };
 
