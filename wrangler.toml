@@ -1,0 +1,14 @@
+name = "zhivoy-risunok"
+main = "src/worker.js"
+compatibility_date = "2025-06-01"
+
+# Сайт (папка public) — Cloudflare раздаёт её сам
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# База данных D1. После создания базы вставь сюда её database_id (см. README, шаг 2)
+[[d1_databases]]
+binding = "DB"
+database_name = "zhivoy-risunok-db"
+database_id = "8e72a3a7-4061-4e95-a7d3-8e3e84ac0f3f"
