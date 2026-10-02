@@ -39,60 +39,54 @@ window.Art = (function () {
     <path class="m-fin" d="M112 100 Q96 128 132 116 Z" fill="#ffd23f" stroke="#2b1b4a" stroke-width="5" stroke-linejoin="round"/>
   </svg>`;
 
+  const INK = '#2b1b4a';
+  // контурная «лента»: тёмная обводка + цвет внутри (хвосты)
+  const tail = (d, color, w = 4) => `<path d="${d}" fill="none" stroke="${INK}" stroke-width="${w + 4}" stroke-linecap="round"/><path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round"/>`;
+
+  // Иллюстрации нарисованы в сетке 400×280 и уменьшены вдвое, чтобы влезть в карточку 200×140
+  const O = `stroke="${INK}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"`;
+  const L = (d, w = 3.5, c = INK) => `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+  // Картинки зверей для карточек (белый фон уже убран). В демо-версии их подменяет window.ART_IMG.
+  const IMG = window.ART_IMG || { sea: '/icons/cover-sea.webp', savanna: '/icons/cover-savanna.webp', home: '/icons/cover-home.webp' };
+  const pic = (src, x, y, w, h, cls) => `<g class="${cls}"><image href="${src}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/></g>`;
+  const goldfish = pic(IMG.sea, 26, 10, 150, 116, 'swim');
+  const elephant = pic(IMG.savanna, 60, 8, 126, 125, 'bob');
+  const kitten = pic(IMG.home, 4, 22, 152, 110, 'bob');
+
   const cover = {
     sea: `
     <svg viewBox="0 0 200 140" preserveAspectRatio="xMidYMid slice">
       <defs><linearGradient id="cs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6ff0ff"/><stop offset="1" stop-color="#1479d6"/></linearGradient></defs>
       <rect width="200" height="140" fill="url(#cs)"/>
-      <path d="M0 122 Q50 110 100 122 T200 120 V140 H0Z" fill="#ffd56b"/>
-      <g class="sway"><path d="M30 130 Q20 100 34 80 Q44 60 32 44" stroke="#22c55e" stroke-width="8" fill="none" stroke-linecap="round"/></g>
-      <g class="sway d2"><path d="M172 130 Q182 104 168 86" stroke="#4ade80" stroke-width="8" fill="none" stroke-linecap="round"/></g>
-      <g class="swim">
-        <path d="M70 70 L48 54 Q54 70 48 86Z" fill="#ffd23f" stroke="#2b1b4a" stroke-width="3.5" stroke-linejoin="round"/>
-        <ellipse cx="98" cy="70" rx="32" ry="22" fill="#ff7a59" stroke="#2b1b4a" stroke-width="3.5"/>
-        <path d="M92 50 Q88 70 92 90" stroke="#fff" stroke-width="5" fill="none" opacity=".6"/>
-        <circle cx="114" cy="64" r="6" fill="#fff" stroke="#2b1b4a" stroke-width="2.5"/><circle cx="116" cy="65" r="3" fill="#2b1b4a"/>
-      </g>
-      <g class="rise"><circle cx="140" cy="60" r="6" fill="none" stroke="#fff" stroke-width="2.5"/><circle cx="150" cy="40" r="4" fill="none" stroke="#fff" stroke-width="2.5"/><circle cx="143" cy="24" r="3" fill="none" stroke="#fff" stroke-width="2"/></g>
+      <path d="M0 124 Q50 112 100 124 T200 122 V140 H0Z" fill="#ffd56b"/>
+      <g class="sway"><path d="M14 134 Q4 106 18 86 Q28 68 16 52" stroke="#22c55e" stroke-width="7" fill="none" stroke-linecap="round"/></g>
+      <g class="sway d2"><path d="M186 134 Q196 108 182 90" stroke="#4ade80" stroke-width="7" fill="none" stroke-linecap="round"/></g>
+      ${goldfish}
     </svg>`,
     savanna: `
     <svg viewBox="0 0 200 140" preserveAspectRatio="xMidYMid slice">
       <defs><linearGradient id="cv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fd8ff"/><stop offset=".65" stop-color="#ffe9a3"/></linearGradient></defs>
       <rect width="200" height="140" fill="url(#cv)"/>
-      <g class="spin" style="transform-origin:160px 30px"><circle cx="160" cy="30" r="16" fill="#ffd23f"/>
-        <g stroke="#ffb703" stroke-width="4" stroke-linecap="round"><path d="M160 6v-4M160 58v-4M136 30h-4M188 30h-4M143 13l-3-3M180 50l-3-3M143 47l-3 3M180 10l-3 3"/></g></g>
-      <path d="M0 96 Q60 78 120 92 T200 88 V140 H0Z" fill="#f8b84e"/>
-      <g class="bob">
-        <g fill="#c2611f" stroke="#2b1b4a" stroke-width="3">
-          ${Array.from({length:12},(_,k)=>{const a=k/12*Math.PI*2;return `<circle cx="${(86+Math.cos(a)*28).toFixed(1)}" cy="${(80+Math.sin(a)*28).toFixed(1)}" r="11"/>`}).join('')}
-        </g>
-        <circle cx="86" cy="80" r="28" fill="#c2611f"/>
-        <circle cx="86" cy="82" r="22" fill="#ffc94d" stroke="#2b1b4a" stroke-width="3"/>
-        <circle cx="78" cy="78" r="3.5" fill="#2b1b4a"/><circle cx="94" cy="78" r="3.5" fill="#2b1b4a"/>
-        <path d="M82 88 L90 88 L86 93Z" fill="#2b1b4a"/>
-        <path d="M80 96 Q86 100 92 96" fill="none" stroke="#2b1b4a" stroke-width="2.5" stroke-linecap="round"/>
-        <circle cx="68" cy="58" r="6" fill="#ffc94d" stroke="#2b1b4a" stroke-width="3"/><circle cx="104" cy="58" r="6" fill="#ffc94d" stroke="#2b1b4a" stroke-width="3"/>
-      </g>
-      <path d="M150 96 q4 -40 -6 -50 M134 44 q20 -10 40 2" stroke="#7a4a24" stroke-width="5" fill="none" stroke-linecap="round"/>
-      <ellipse cx="152" cy="44" rx="30" ry="8" fill="#3f9b3f"/>
+      <g class="spin" style="transform-origin:174px 24px"><circle cx="174" cy="24" r="13" fill="#ffd23f"/>
+        <g stroke="#ffb703" stroke-width="4" stroke-linecap="round"><path d="M174 4v-3M174 47v-3M154 24h-3M197 24h-3M160 10l-2-2M188 38l-2-2M160 38l-2 2M188 10l-2 2"/></g></g>
+      <path d="M0 98 Q60 82 120 94 T200 90 V140 H0Z" fill="#f8b84e"/>
+      <path d="M26 100 q3 -38 -6 -48 M8 52 q18 -9 36 2" stroke="#7a4a24" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <ellipse cx="26" cy="50" rx="26" ry="7.5" fill="#3f9b3f"/>
+      <ellipse cx="122" cy="132" rx="56" ry="5" fill="#d98b2b" opacity=".45"/>
+      ${elephant}
     </svg>`,
     home: `
     <svg viewBox="0 0 200 140" preserveAspectRatio="xMidYMid slice">
       <rect width="200" height="140" fill="#ffd6e7"/>
-      <g fill="#fff" opacity=".7"><circle cx="20" cy="20" r="5"/><circle cx="60" cy="34" r="4"/><circle cx="180" cy="22" r="5"/><circle cx="140" cy="40" r="3"/></g>
-      <rect y="104" width="200" height="36" fill="#f2b880"/>
-      <path d="M120 104 V62 L150 38 L180 62 V104Z" fill="#ffe08a" stroke="#2b1b4a" stroke-width="3" stroke-linejoin="round"/>
-      <path d="M112 66 L150 32 L188 66" fill="none" stroke="#ff5fa2" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-      <rect x="140" y="74" width="20" height="30" rx="3" fill="#7c3aed"/>
-      <g class="bob">
-        <path d="M44 74 L50 50 L62 66 M90 66 L102 50 L106 74" fill="#9ca3af" stroke="#2b1b4a" stroke-width="3" stroke-linejoin="round"/>
-        <ellipse cx="75" cy="84" rx="34" ry="28" fill="#a3a3b8" stroke="#2b1b4a" stroke-width="3"/>
-        <circle cx="64" cy="80" r="4" fill="#2b1b4a"/><circle cx="86" cy="80" r="4" fill="#2b1b4a"/>
-        <path d="M72 88 L78 88 L75 92Z" fill="#ff5fa2"/>
-        <path d="M68 96 Q75 100 82 96" fill="none" stroke="#2b1b4a" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="M44 86 H58 M44 92 L58 90 M92 86 H106 M92 90 L106 92" stroke="#2b1b4a" stroke-width="2" stroke-linecap="round"/>
-      </g>
-      <g class="beat" style="transform-origin:30px 112px"><path d="M30 120 C14 108 20 98 30 106 C40 98 46 108 30 120Z" fill="#ff4f8b"/></g>
+      <g fill="#fff" opacity=".7"><circle cx="20" cy="20" r="5"/><circle cx="60" cy="14" r="4"/><circle cx="110" cy="10" r="3"/></g>
+      <rect y="108" width="200" height="32" fill="#f2b880"/>
+      <path d="M150 108 V72 L174 52 L198 72 V108Z" fill="#ffe08a" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M144 76 L174 46 L204 76" fill="none" stroke="#ff5fa2" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="166" y="84" width="16" height="24" rx="3" fill="#7c3aed"/>
+      <ellipse cx="80" cy="131" rx="64" ry="5" fill="#c97b45" opacity=".45"/>
+      <g class="beat" style="transform-origin:20px 34px"><path d="M20 42 C6 32 11 23 20 29 C29 23 34 32 20 42Z" fill="#ff4f8b"/></g>
+      ${kitten}
     </svg>`,
   };
 
