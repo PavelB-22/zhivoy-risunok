@@ -1,7 +1,7 @@
 // Сервис-воркер: приложение открывается быстро и ставится на рабочий стол.
 // Запросы к /api/ всегда идут в сеть (рисунки всегда свежие).
-const CACHE = 'zr-v4';
-const SHELL = ['/', '/index.html', '/style.css', '/js/app.js', '/js/scene.js', '/js/cutout.js', '/js/sound.js', '/js/art.js', '/js/templates.js', '/js/templates-real.js', '/manifest.webmanifest', '/icons/icon-192.png'];
+const CACHE = 'zr-v5';
+const SHELL = ['/', '/index.html', '/style.css', '/js/app.js', '/js/scene.js', '/js/cutout.js', '/js/sound.js', '/js/art.js', '/js/templates.js', '/js/templates-real.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/cover-sea.webp', '/icons/cover-savanna.webp', '/icons/cover-home.webp'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
