@@ -2,6 +2,7 @@
 // Всё, что начинается с /api/, обрабатывается здесь. Остальное (сайт) отдаёт Cloudflare из папки public.
 
 const LOCATIONS = ['sea', 'savanna', 'home'];
+const MOTIONS = ['swim', 'walk', 'fly', 'hop']; // плавает, ходит, летает, прыгает
 const SCREEN_LIMIT = 10;            // сколько существ одновременно на экране
 const SESSION_DAYS = 60;            // сколько дней держится вход
 const MAX_IMAGE_CHARS = 1_400_000;  // ~1 МБ картинка максимум
@@ -30,6 +31,7 @@ async function handleApi(request, env, url) {
   if (path === '/api/logout' && method === 'POST') return logout(request, env);
 
   const user = await currentUser(request, env);
+  await ensureSchema(env);
   if (path === '/api/me') return json({ user: user ? { id: user.id, login: user.login } : null });
   if (!user) return json({ error: 'Нужно войти в аккаунт' }, 401);
 
@@ -39,7 +41,7 @@ async function handleApi(request, env, url) {
     if (!LOCATIONS.includes(loc)) return json({ error: 'Неизвестная локация' }, 400);
     const all = url.searchParams.get('all') === '1';
     const { results } = await env.DB.prepare(
-      `SELECT id, name, w, h, created_at FROM creatures
+      `SELECT id, name, w, h, motion, created_at FROM creatures
        WHERE user_id = ? AND location = ? ORDER BY id DESC LIMIT ?`
     ).bind(user.id, loc, all ? 500 : SCREEN_LIMIT).all();
     return json({ creatures: results.reverse() });
@@ -53,13 +55,14 @@ async function handleApi(request, env, url) {
     const name = String(body.name || '').trim().slice(0, 40);
     const w = Math.round(Number(body.w) || 0);
     const h = Math.round(Number(body.h) || 0);
+    const motion = MOTIONS.includes(body.motion) ? body.motion : null;
     if (!LOCATIONS.includes(loc)) return json({ error: 'Неизвестная локация' }, 400);
     if (!/^data:image\/(png|webp|jpeg);base64,/.test(image)) return json({ error: 'Это не картинка' }, 400);
     if (image.length > MAX_IMAGE_CHARS) return json({ error: 'Картинка слишком большая' }, 413);
     if (w < 8 || h < 8 || w > 2000 || h > 2000) return json({ error: 'Странный размер картинки' }, 400);
     const res = await env.DB.prepare(
-      `INSERT INTO creatures (user_id, location, name, image, w, h, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(user.id, loc, name, image, w, h, Date.now()).run();
+      `INSERT INTO creatures (user_id, location, name, image, w, h, motion, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(user.id, loc, name, image, w, h, motion, Date.now()).run();
     return json({ ok: true, id: res.meta.last_row_id });
   }
 
@@ -84,6 +87,22 @@ async function handleApi(request, env, url) {
   }
 
   return json({ error: 'Не найдено' }, 404);
+}
+
+// ---------- Обновление базы ----------
+// Колонка motion (как двигается зверёк) появилась позже. Добавляем её сами, руками ничего делать не нужно.
+let schemaChecked = false;
+async function ensureSchema(env) {
+  if (schemaChecked) return;
+  try {
+    const { results } = await env.DB.prepare(`PRAGMA table_info(creatures)`).all();
+    if (!results.some((c) => c.name === 'motion')) {
+      await env.DB.prepare(`ALTER TABLE creatures ADD COLUMN motion TEXT`).run();
+    }
+    schemaChecked = true;
+  } catch (e) {
+    console.error('ensureSchema', e);
+  }
 }
 
 // ---------- Аккаунты ----------
