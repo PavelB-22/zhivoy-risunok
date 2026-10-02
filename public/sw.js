@@ -1,6 +1,6 @@
 // Сервис-воркер: приложение открывается быстро и ставится на рабочий стол.
 // Запросы к /api/ всегда идут в сеть (рисунки всегда свежие).
-const CACHE = 'zr-v3';
+const CACHE = 'zr-v4';
 const SHELL = ['/', '/index.html', '/style.css', '/js/app.js', '/js/scene.js', '/js/cutout.js', '/js/sound.js', '/js/art.js', '/js/templates.js', '/js/templates-real.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
